@@ -231,16 +231,18 @@ Question: {question}
 
 Provide:
 1. Your answer (just the number)
-2. {num_key_facts} key facts that must be true for your answer to be correct (brief, one per line)
+2. {num_key_facts} key intermediate calculation steps that led to your answer (show the math, one per line)
 3. Your confidence (0.0 to 1.0)
 
 Format your response as:
 Answer: <number>
 Key Facts:
-- Fact 1
-- Fact 2
-- Fact 3
-Confidence: <0.0-1.0>"""
+- First calculation: <show the computation>
+- Second calculation: <show the computation>
+- Third calculation: <show the computation>
+Confidence: <0.0-1.0>
+
+Make sure each fact shows a specific numerical calculation or reasoning step."""
 
     response1, tokens1 = call_llm(client, provider, model, prompt1, temperature, 200)
 
@@ -265,40 +267,44 @@ Confidence: <0.0-1.0>"""
     except:
         pass
 
-    # [VALIDATOR FIX - Attempt 1]
-    # [PROBLEM]: Evidence verification never triggers CoT (evidence_score always 1.0)
-    # [CAUSE]: Verification prompt asks if facts are "in the question", but key facts are derived conclusions/calculations, not literal question statements. This makes all facts that restate the question get SUPPORTED, yielding evidence_score=1.0.
-    # [FIX]: Change verification to check if facts are logically COHERENT and SUFFICIENT (do they logically connect and lead to the answer?), not whether they appear in the question text. This better captures the hypothesis's intent of "verbalizable evidence signal."
+    # [VALIDATOR FIX - Attempt 2]
+    # [PROBLEM]: Evidence verification never triggers CoT (evidence_score remains 1.0)
+    # [CAUSE]: The key facts extracted were often just restatements of the question, not calculation steps. Without seeing the calculations, the verifier couldn't catch errors. The hypothesis requires "verbalizable evidence" which should include the reasoning steps.
+    # [FIX]: (1) Modified prompt1 above to request "intermediate calculation steps" instead of generic "key facts". (2) Verification now checks if each calculation is mathematically correct.
     #
     # [OLD CODE]:
-    # prompt2 = """Given only the question below, mark each fact as SUPPORTED, UNSUPPORTED, or UNCLEAR based on whether it can be directly verified from the question alone (not the solution)."""
+    # Verification checked if facts "support" the answer generally
     #
     # [NEW CODE]:
-    # Stage 2: Verify key facts
+    # Stage 2: Verify each calculation step
     if len(key_facts) > 0:
         facts_text = "\n".join([f"{i + 1}. {fact}" for i, fact in enumerate(key_facts)])
-        prompt2 = f"""Given the question and the proposed answer, evaluate whether each key fact is COHERENT (logically sound and relevant) or INCOHERENT (incorrect, irrelevant, or insufficient for the answer).
+        prompt2 = f"""You are a math teacher checking a student's work. Verify if each calculation below is CORRECT or contains an ERROR.
 
 Question: {question}
 
-Proposed Key Facts:
+Student's calculation steps:
 {facts_text}
 
-For each fact, respond with just: COHERENT or INCOHERENT
-Format: "1. COHERENT" etc.
+For each step, verify the math and respond with:
+- "1. CORRECT" if the calculation is right
+- "1. ERROR" if there's a math mistake
 
-Mark a fact as INCOHERENT if it contains calculation errors, wrong assumptions, or doesn't logically contribute to solving the problem."""
+Only mark CORRECT if the numerical calculation is accurate."""
 
         response2, tokens2 = call_llm(
             client, provider, model, prompt2, temperature, 100
         )
 
-        # Count coherent facts
-        coherent_count = response2.upper().count("COHERENT")
-        # Subtract the incoherent count to avoid double-counting "INCOHERENT" as "COHERENT"
-        incoherent_count = response2.upper().count("INCOHERENT")
-        coherent_count = max(0, coherent_count - incoherent_count)
-        evidence_score = coherent_count / len(key_facts) if len(key_facts) > 0 else 0.0
+        # Count correct calculations
+        # Check for "CORRECT" but exclude lines with "INCORRECT" or "ERROR"
+        lines = response2.upper().split("\n")
+        correct_count = sum(
+            1
+            for line in lines
+            if "CORRECT" in line and "INCORRECT" not in line and "ERROR" not in line
+        )
+        evidence_score = correct_count / len(key_facts) if len(key_facts) > 0 else 0.0
     else:
         tokens2 = 0
         evidence_score = 0.0
