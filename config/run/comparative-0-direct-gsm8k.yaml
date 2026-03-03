@@ -1,0 +1,22 @@
+# Comparative baseline: Direct answering (no reasoning)
+run_id: comparative-0-direct-gsm8k
+
+method:
+  type: direct
+  description: "Direct answer without any chain-of-thought reasoning"
+
+model:
+  provider: openai  # or anthropic
+  name: gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 50
+
+dataset:
+  name: gsm8k
+  split: test
+  num_tuning: 50
+  num_eval: 150
+
+inference:
+  task: qa_numeric
+  cache_dir: .cache

@@ -1,0 +1,25 @@
+# Proposed method: Evidence-Adaptive CoT
+run_id: proposed-ea-cot-gsm8k
+
+method:
+  type: ea_cot
+  description: "Evidence-Adaptive CoT: gate reasoning using confidence + evidence score"
+  confidence_threshold: null  # will be tuned on tuning set
+  evidence_threshold: null    # will be tuned on tuning set
+  num_key_facts: 3           # number of key facts to extract
+
+model:
+  provider: openai  # or anthropic
+  name: gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 500
+
+dataset:
+  name: gsm8k
+  split: test
+  num_tuning: 50
+  num_eval: 150
+
+inference:
+  task: qa_numeric
+  cache_dir: .cache

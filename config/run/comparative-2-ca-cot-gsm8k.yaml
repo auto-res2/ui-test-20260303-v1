@@ -1,0 +1,23 @@
+# Comparative baseline: Confidence-Adaptive CoT
+run_id: comparative-2-ca-cot-gsm8k
+
+method:
+  type: ca_cot
+  description: "Confidence-adaptive CoT: trigger reasoning if confidence < threshold"
+  confidence_threshold: null  # will be tuned on tuning set
+
+model:
+  provider: openai  # or anthropic
+  name: gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 500
+
+dataset:
+  name: gsm8k
+  split: test
+  num_tuning: 50
+  num_eval: 150
+
+inference:
+  task: qa_numeric
+  cache_dir: .cache

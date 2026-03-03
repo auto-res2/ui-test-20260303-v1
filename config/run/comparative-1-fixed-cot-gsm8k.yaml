@@ -1,0 +1,22 @@
+# Comparative baseline: Fixed CoT (always use chain-of-thought)
+run_id: comparative-1-fixed-cot-gsm8k
+
+method:
+  type: fixed_cot
+  description: "Always apply full chain-of-thought reasoning"
+
+model:
+  provider: openai  # or anthropic
+  name: gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 500
+
+dataset:
+  name: gsm8k
+  split: test
+  num_tuning: 50
+  num_eval: 150
+
+inference:
+  task: qa_numeric
+  cache_dir: .cache
