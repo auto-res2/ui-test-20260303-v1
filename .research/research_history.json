@@ -206,5 +206,94 @@
     "experimental_code": "import re\nfrom dataclasses import dataclass\nfrom typing import Callable, Dict, List, Optional, Tuple\n\n# llm(prompt: str) -> str must be provided by the user.\n\nNUM_RE = re.compile(r\"[-+]?\\d+\")\n\n\ndef extract_number(text: str) -> Optional[str]:\n    m = re.search(r\"####\\s*([-+]?\\d+)\", text)\n    if m:\n        return m.group(1)\n    nums = NUM_RE.findall(text)\n    return nums[-1] if nums else None\n\n\ndef extract_field(text: str, name: str) -> Optional[str]:\n    m = re.search(rf\"^{name}:\\s*(.*)$\", text, flags=re.MULTILINE)\n    return m.group(1).strip() if m else None\n\n\ndef parse_facts(block: str) -> List[str]:\n    # Accept \"- ...\" or \"1) ...\" lines\n    facts = []\n    for line in block.splitlines():\n        line = line.strip()\n        if not line:\n            continue\n        line = re.sub(r\"^[-*]\\s+\", \"\", line)\n        line = re.sub(r\"^\\d+\\)\\s+\", \"\", line)\n        if line:\n            facts.append(line)\n    return facts[:4]\n\n\n@dataclass\nclass EAResult:\n    answer: Optional[str]\n    used_cot: bool\n    conf: float\n    evidence: float\n    raw_stage1: str\n    raw_stage2: str\n    raw_cot: str\n\n\ndef ea_cot_solve(question: str,\n                llm: Callable[[str], str],\n                tau_c: float = 0.7,\n                tau_e: float = 0.7,\n                task: str = \"gsm8k\") -> EAResult:\n    \"\"\"Evidence-Adaptive CoT (prompt-only).\n\n    task: 'gsm8k' | 'bool' | 'mc'\n    \"\"\"\n\n    # Stage 1: draft answer + key facts + confidence (no rationale)\n    if task == \"gsm8k\":\n        ans_format = \"<final numeric answer>\"\n    elif task == \"bool\":\n        ans_format = \"Yes or No\"\n    else:\n        ans_format = \"<option letter>\"\n\n    p1 = (\n        \"You must NOT show your reasoning. Output exactly three fields.\\n\"\n        f\"Answer: {ans_format}\\n\"\n        \"KeyFacts: 2-4 short atomic facts that must be true for the Answer to be correct.\\n\"\n        \"Confidence: a number in [0,1].\\n\\n\"\n        f\"Question: {question}\\n\"\n    )\n    r1 = llm(p1)\n\n    ans1 = extract_field(r1, \"Answer\")\n    kf = extract_field(r1, \"KeyFacts\") or \"\"\n    facts = parse_facts(kf) if kf else []\n\n    conf_s = extract_field(r1, \"Confidence\")\n    try:\n        c = float(re.findall(r\"[01](?:\\.\\d+)?\", conf_s or \"\")[0])\n    except Exception:\n        c = 0.0\n\n    # Task-specific normalization\n    if task == \"gsm8k\" and ans1 is not None:\n        ans1 = extract_number(ans1) or extract_number(r1)\n    if task == \"bool\" and ans1 is not None:\n        ans1 = ans1.strip().lower()\n        ans1 = \"yes\" if ans1.startswith(\"y\") else (\"no\" if ans1.startswith(\"n\") else ans1)\n\n    # Stage 2: terse fact verification -> evidence score e\n    if not facts:\n        e = 0.0\n        r2 = \"\"\n    else:\n        facts_blob = \"\\n\".join([f\"- {f}\" for f in facts])\n        p2 = (\n            \"Verify each KeyFact against the question ONLY. \"\n            \"For each fact, output one token: S (supported), U (unsupported), or C (unclear).\\n\"\n            \"Then output a final line Evidence: <fraction supported between 0 and 1>.\\n\\n\"\n            f\"Question: {question}\\n\"\n            f\"KeyFacts:\\n{facts_blob}\\n\"\n        )\n        r2 = llm(p2)\n        tags = re.findall(r\"\\b[SUC]\\b\", r2)\n        supported = sum(1 for t in tags[:len(facts)] if t == \"S\")\n        e = supported / max(1, len(facts))\n\n    # Gate\n    need_cot = (c < tau_c) or (e < tau_e) or (ans1 is None)\n\n    if not need_cot:\n        return EAResult(answer=ans1, used_cot=False, conf=c, evidence=e,\n                        raw_stage1=r1, raw_stage2=r2, raw_cot=\"\")\n\n    # Deep reasoning (few steps) + one-line check\n    p3 = (\n        \"Solve using the FEWEST steps needed. \"\n        \"After reasoning, output exactly two final lines:\\n\"\n        \"Check: <one-line sanity check>\\n\"\n        f\"Answer: {ans_format}\\n\\n\"\n        f\"Question: {question}\\n\"\n    )\n    r3 = llm(p3)\n    ans3 = extract_field(r3, \"Answer\")\n\n    if task == \"gsm8k\" and ans3 is not None:\n        ans3 = extract_number(ans3) or extract_number(r3)\n    if task == \"bool\" and ans3 is not None:\n        a = ans3.strip().lower()\n        ans3 = \"yes\" if a.startswith(\"y\") else (\"no\" if a.startswith(\"n\") else a)\n\n    return EAResult(answer=ans3, used_cot=True, conf=c, evidence=e,\n                    raw_stage1=r1, raw_stage2=r2, raw_cot=r3)\n",
     "expected_result": "At matched or lower average tokens than fixed CoT, EA-CoT should improve accuracy and reduce overconfident errors.\n\nPredicted (200 items each; illustrative for a mid-size instruct model):\nGSM8K:\n- Direct: accuracy ~0.55, tokens ~30\n- Fixed CoT: accuracy ~0.70, tokens ~220\n- CA-CoT: accuracy ~0.72, tokens ~140, confident-wrong rate ~0.18\n- EA-CoT: accuracy ~0.74, tokens ~145, confident-wrong rate ~0.10\n\nStrategyQA:\n- Direct: accuracy ~0.62, tokens ~25\n- Fixed CoT: accuracy ~0.66, tokens ~180\n- CA-CoT: accuracy ~0.66, tokens ~110, confident-wrong ~0.22\n- EA-CoT: accuracy ~0.68, tokens ~115, confident-wrong ~0.12\n\nDirectionality:\n- Higher is better for accuracy.\n- Lower is better for tokens and confident-wrong rate.\n\nKey claim to validate: EA-CoT beats CA-CoT on accuracy at equal token cost OR matches accuracy while materially lowering confident-wrong outputs.",
     "expected_conclusion": "EA-CoT makes adaptive prompting more reliable by grounding “should I think more?” in a decomposed evidence signal rather than a brittle scalar confidence. Academically, it reframes metacognitive control in LLM prompting as *evidence-consistency estimation* (prompt-only) and enables new analyses (confident-wrong reduction, selective accuracy at budget). Practically and socially, it reduces costly overthinking while also reducing confidently incorrect answers—important for user trust and safer deployment—without any fine-tuning, sampling, or external verifiers."
+  },
+  "experimental_design": {
+    "experiment_summary": "We evaluate prompt-only instance-adaptive reasoning controllers that decide when to spend extra tokens on chain-of-thought (CoT). Each example is a short question-answering task where the model must output a final answer (numeric for GSM8K). We compare (a) always answering directly, (b) always using CoT, and (c) adaptive gating policies. The proposed Evidence-Adaptive Chain-of-Thought (EA-CoT) uses a 2-stage evidence decomposition: the model first outputs a draft answer (no rationale), 2–4 atomic “Key Facts” that must be true for the answer, and a scalar confidence c. A second, terse self-check marks each fact as supported/unsupported/unclear using only the question text, yielding an evidence score e (fraction supported). Full minimal CoT is triggered only if (c < τc) OR (e < τe), otherwise the draft answer is returned. This aims to reduce confidently-wrong outputs from miscalibrated confidence while controlling verbosity.\n\nWorkflow (single model, fixed decoding):\n1) Load GSM8K test split and take the first 200 items (small, scriptable).\n2) Split: first 50 for threshold tuning, remaining 150 for evaluation.\n3) Run 4 methods per item: Direct, Fixed-CoT, CA-CoT (confidence-only gating), EA-CoT (confidence+evidence gating).\n4) For CA-CoT and EA-CoT, grid-search thresholds on the 50-item tuning set; then evaluate best thresholds under a token-budget constraint (match mean output tokens to CA-CoT) on the 150-item eval set.\n5) Report accuracy (primary), token cost, calibration-aware reliability metrics (confident-wrong rate), and selective accuracy at matched budget.\n\nScale constraints for the provided Runner (4 vCPU / 16 GB): the experiment uses only 200 GSM8K examples, no training, no sampling, and runs sequentially with lightweight Python + HuggingFace datasets. Runtime is dominated by API calls; locally it fits easily in memory/CPU. We log token counts using the API’s usage metadata when available, otherwise approximate via a tokenizer/character heuristic.",
+    "runner_config": {
+      "runner_label": [
+        "ubuntu-latest"
+      ],
+      "description": "CPU: 4 vCPU, RAM: 16 GB"
+    },
+    "evaluation_metrics": [
+      {
+        "name": "accuracy",
+        "description": "Correctness criteria: For each GSM8K item, extract the model’s final numeric prediction and compare to the gold answer number. Use robust numeric extraction: (i) if output contains a line like '#### N', take N; else take the last integer in the output. Normalize by stripping commas/spaces and allowing optional leading '+'; treat missing/invalid extraction as incorrect. Calculation: accuracy = (1/N) * Σ_i 1[pred_i == gold_i]. Task appropriateness: GSM8K is a single-answer grade-school arithmetic benchmark; exact numeric correctness is the standard success criterion and aligns with user-visible utility. Visualizations: per-method bar chart of accuracy with 95% bootstrap CIs; error breakdown plot by problem length (quantiles of question tokens) showing accuracy vs length."
+      },
+      {
+        "name": "avg_tokens",
+        "description": "Correctness criteria: Token count is a cost proxy, not correctness. Measure total generated output tokens per problem (sum across all calls used by the method: stage-1 + stage-2 + optional CoT stage). Prefer provider-reported usage.output_tokens; if unavailable, approximate with a local tokenizer (e.g., tiktoken for OpenAI-like BPE) or fall back to (chars/4) heuristic with a note. Calculation: avg_tokens = (1/N) * Σ_i tokens_i. Task appropriateness: The hypothesis targets better reliability at fixed token budget; token usage directly measures verbosity/compute. Visualizations: box/violin plot of per-item token usage; scatter of tokens vs correctness."
+      },
+      {
+        "name": "confident-wrong rate",
+        "description": "Correctness criteria: An item is 'confident-wrong' if the final answer is incorrect AND the stage-1 reported confidence c >= 0.8 (for methods that collect c: CA-CoT and EA-CoT; for Direct/Fixed-CoT report as N/A or compute c from an added required field if you choose to instrument them consistently). Calculation: confident_wrong_rate = (# {i: incorrect_i ∧ c_i ≥ 0.8}) / (# {i: incorrect_i}). If there are zero errors, define as 0. Task appropriateness: Measures socially harmful overconfidence/miscalibration, central to the research gap. Visualizations: per-method bar chart; calibration-style plot overlaying error rate among c≥0.8 vs others."
+      },
+      {
+        "name": "selective accuracy @ matched token budget",
+        "description": "Correctness criteria: Same numeric correctness as accuracy, but computed under a constraint that mean token usage matches a target budget B (e.g., the best CA-CoT configuration’s avg_tokens on tuning, or a fixed B). Calculation method: (1) On tuning set, compute avg_tokens for each (τc, τe) grid point for EA-CoT and each τc for CA-CoT. (2) Choose the best configuration whose avg_tokens is within ±δ of B (δ small, e.g., 5 tokens) maximizing tuning accuracy; if none within δ, pick the closest avg_tokens to B, breaking ties by higher accuracy. (3) Report evaluation-set accuracy using that configuration. Task appropriateness: Directly tests the claim ‘better reliability at equal cost’ while preventing trivial gains from spending more tokens. Visualizations: Pareto curve (accuracy vs avg_tokens) across threshold grid; mark chosen operating points."
+      },
+      {
+        "name": "evidence score stats (EA-CoT only)",
+        "description": "Correctness criteria: Evidence score e is internal; we evaluate its distribution and its relationship with correctness. Calculation: report mean(e), and compute AUC of using e to predict correctness (treat correctness as label, score as e), plus correlation corr(e, 1[correct]). Also report trigger rate: fraction of items where (c<τc or e<τe) caused CoT. Task appropriateness: Validates the mechanism—e should be lower on hard/incorrect cases and drive gating. Visualizations: histogram of e for correct vs incorrect; reliability diagram binned by e showing empirical accuracy per bin."
+      }
+    ],
+    "models_to_use": [
+      "gemini-2.5-flash (unknown parameters)"
+    ],
+    "datasets_to_use": [
+      "GSM8K"
+    ],
+    "proposed_method": {
+      "method_name": "EA-CoT (Evidence-Adaptive Chain-of-Thought)",
+      "description": "Prompt-only, two-stage adaptive reasoning controller. Stage-1 produces a draft answer (no rationale), 2–4 atomic answer-critical Key Facts, and confidence c. Stage-2 tersely verifies each fact using only the question, yielding evidence score e = fraction supported. Trigger minimal CoT only if (c < τc) OR (e < τe), reducing reliance on miscalibrated scalar confidence and explicitly controlling verbosity via gating and ‘fewest steps’ CoT.",
+      "optuna_config": {
+        "enabled": false,
+        "n_trials": 20,
+        "search_spaces": [
+          {
+            "param_name": "tau_c",
+            "distribution_type": "categorical",
+            "choices": [
+              0.5,
+              0.6,
+              0.7,
+              0.8
+            ]
+          },
+          {
+            "param_name": "tau_e",
+            "distribution_type": "categorical",
+            "choices": [
+              0.5,
+              0.6,
+              0.7,
+              0.8
+            ]
+          }
+        ]
+      }
+    },
+    "comparative_methods": [
+      {
+        "method_name": "CA-CoT (Confidence-Adaptive CoT)",
+        "description": "Prompt-only adaptive baseline that triggers CoT based solely on the model’s self-reported confidence c from an initial short answer. Procedure: Stage-1 outputs Answer + Confidence (optionally KeyFacts unused). Gate: run CoT iff c < τc; otherwise return draft answer. Tests sensitivity to confidence miscalibration and verbosity gaming.",
+        "optuna_config": {
+          "enabled": false,
+          "n_trials": 20,
+          "search_spaces": [
+            {
+              "param_name": "tau_c",
+              "distribution_type": "categorical",
+              "choices": [
+                0.5,
+                0.6,
+                0.7,
+                0.8
+              ]
+            }
+          ]
+        }
+      }
+    ]
   }
 }
