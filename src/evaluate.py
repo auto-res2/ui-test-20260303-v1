@@ -106,9 +106,22 @@ def _convert_to_json_serializable(obj: Any, visited=None) -> Any:
     visited.add(obj_id)
 
     if isinstance(obj, dict):
+        # [VALIDATOR FIX - Attempt 3]
+        # [PROBLEM]: TypeError: keys must be str, int, float, bool or None, not PoolKey
+        # [CAUSE]: Dictionary keys can be non-JSON-serializable objects (e.g., PoolKey from urllib3)
+        # [FIX]: Convert all dictionary keys to strings before creating the output dict
+        #
+        # [OLD CODE]:
+        # return {
+        #     key: _convert_to_json_serializable(value, visited)
+        #     for key, value in obj.items()
+        # }
+        #
+        # [NEW CODE]:
         # Handle dict-like objects including WandB SummarySubDict
+        # Convert keys to strings to ensure JSON serializability
         return {
-            key: _convert_to_json_serializable(value, visited)
+            str(key): _convert_to_json_serializable(value, visited)
             for key, value in obj.items()
         }
     elif isinstance(obj, (list, tuple)):
