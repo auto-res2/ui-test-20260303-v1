@@ -54,15 +54,44 @@ def load_gsm8k_data(
     return {"tuning": tuning_examples, "eval": eval_examples}
 
 
+# [VALIDATOR FIX - Attempt 1]
+# [PROBLEM]: Accuracy is 0.0 because answers are being parsed incorrectly (extracting confidence instead of answer)
+# [CAUSE]: extract_numeric_answer picks the last number in text, which is the confidence value (e.g., 1.0) instead of the answer (e.g., 126)
+# [FIX]: Add pattern to match "Answer: NUMBER" format first, before falling back to last number
+#
+# [OLD CODE]:
+# def extract_numeric_answer(text: str) -> float:
+#     """Extract numeric answer from model output."""
+#     import re
+#     # Try to find patterns like "#### NUMBER" (GSM8K format)
+#     match = re.search(r"####\s*([0-9,]+(?:\.[0-9]+)?)", text)
+#     if match:
+#         return float(match.group(1).replace(",", ""))
+#     # Try to find "answer is NUMBER" patterns
+#     match = re.search(r"answer\s+is\s+([0-9,]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+#     if match:
+#         return float(match.group(1).replace(",", ""))
+#     # Try to find any number in the text (prefer the last one)
+#     numbers = re.findall(r"([0-9,]+(?:\.[0-9]+)?)", text)
+#     if numbers:
+#         return float(numbers[-1].replace(",", ""))
+#     raise ValueError(f"Could not extract numeric answer from: {text[:100]}")
+#
+# [NEW CODE]:
 def extract_numeric_answer(text: str) -> float:
     """
     Extract numeric answer from model output.
-    Handles various formats like "The answer is 42" or "42" or "#### 42"
+    Handles various formats like "The answer is 42" or "42" or "#### 42" or "Answer: 42"
     """
     import re
 
     # Try to find patterns like "#### NUMBER" (GSM8K format)
     match = re.search(r"####\s*([0-9,]+(?:\.[0-9]+)?)", text)
+    if match:
+        return float(match.group(1).replace(",", ""))
+
+    # Try to find "Answer: NUMBER" patterns (common in our prompts)
+    match = re.search(r"answer\s*:\s*([0-9,]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
     if match:
         return float(match.group(1).replace(",", ""))
 
@@ -72,6 +101,7 @@ def extract_numeric_answer(text: str) -> float:
         return float(match.group(1).replace(",", ""))
 
     # Try to find any number in the text (prefer the last one)
+    # This is a fallback and may pick up wrong numbers if multiple exist
     numbers = re.findall(r"([0-9,]+(?:\.[0-9]+)?)", text)
     if numbers:
         return float(numbers[-1].replace(",", ""))
