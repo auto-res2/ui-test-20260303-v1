@@ -22,3 +22,15 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# [VALIDATOR FIX - Attempt 1]
+# [PROBLEM]: Docker build failed during uv sync - hatchling couldn't determine which files to ship
+# [CAUSE]: pyproject.toml missing hatchling configuration to specify source package location
+# [FIX]: Added tool.hatch.build.targets.wheel.packages configuration pointing to "src"
+#
+# [OLD CODE]:
+# (No hatch configuration was present)
+#
+# [NEW CODE]:
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
