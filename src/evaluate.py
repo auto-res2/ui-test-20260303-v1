@@ -54,6 +54,38 @@ def parse_args():
     return parser.parse_args(processed_argv)
 
 
+# [VALIDATOR FIX - Attempt 1]
+# [PROBLEM]: TypeError: Object of type SummarySubDict is not JSON serializable
+# [CAUSE]: run.summary contains nested WandB SummarySubDict objects that dict() doesn't recursively convert
+# [FIX]: Add recursive conversion function to ensure all nested WandB objects are converted to plain Python types
+#
+# [OLD CODE]:
+# def fetch_run_data(entity: str, project: str, run_id: str) -> Dict[str, Any]:
+#     ...
+#     config = run.config
+#     summary = dict(run.summary)
+#     ...
+#
+# [NEW CODE]:
+def _convert_to_json_serializable(obj: Any) -> Any:
+    """
+    Recursively convert WandB objects and other non-JSON-serializable types to plain Python types.
+    """
+    if isinstance(obj, dict):
+        # Handle dict-like objects including WandB SummarySubDict
+        return {key: _convert_to_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_to_json_serializable(item) for item in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    elif hasattr(obj, "__dict__"):
+        # For custom objects, try to convert their __dict__
+        return _convert_to_json_serializable(obj.__dict__)
+    else:
+        # For other types, convert to string as fallback
+        return str(obj)
+
+
 def fetch_run_data(entity: str, project: str, run_id: str) -> Dict[str, Any]:
     """
     Fetch run data from WandB API.
@@ -74,9 +106,9 @@ def fetch_run_data(entity: str, project: str, run_id: str) -> Dict[str, Any]:
 
     run = runs[0]
 
-    # Get config and summary
-    config = run.config
-    summary = dict(run.summary)
+    # Get config and summary - recursively convert to JSON-serializable types
+    config = _convert_to_json_serializable(dict(run.config))
+    summary = _convert_to_json_serializable(dict(run.summary))
 
     # Get history (time series metrics)
     history = run.history()
