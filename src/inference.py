@@ -582,9 +582,20 @@ def run_inference(cfg: DictConfig) -> None:
         wandb.log(metrics)
         wandb.summary.update(metrics)
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: FileNotFoundError when results_dir is empty string
+    # [CAUSE]: Command line override passes results_dir= (empty string) which overrides default .research/results
+    # [FIX]: Use default .research/results if results_dir is empty or None
+    #
+    # [OLD CODE]:
+    # os.makedirs(cfg.results_dir, exist_ok=True)
+    # results_file = os.path.join(cfg.results_dir, f"{cfg.run.run_id}_results.json")
+    #
+    # [NEW CODE]:
     # Save results
-    os.makedirs(cfg.results_dir, exist_ok=True)
-    results_file = os.path.join(cfg.results_dir, f"{cfg.run.run_id}_results.json")
+    results_dir = cfg.results_dir if cfg.results_dir else ".research/results"
+    os.makedirs(results_dir, exist_ok=True)
+    results_file = os.path.join(results_dir, f"{cfg.run.run_id}_results.json")
     with open(results_file, "w") as f:
         json.dump(
             {
