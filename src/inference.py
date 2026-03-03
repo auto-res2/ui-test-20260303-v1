@@ -265,26 +265,40 @@ Confidence: <0.0-1.0>"""
     except:
         pass
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Evidence verification never triggers CoT (evidence_score always 1.0)
+    # [CAUSE]: Verification prompt asks if facts are "in the question", but key facts are derived conclusions/calculations, not literal question statements. This makes all facts that restate the question get SUPPORTED, yielding evidence_score=1.0.
+    # [FIX]: Change verification to check if facts are logically COHERENT and SUFFICIENT (do they logically connect and lead to the answer?), not whether they appear in the question text. This better captures the hypothesis's intent of "verbalizable evidence signal."
+    #
+    # [OLD CODE]:
+    # prompt2 = """Given only the question below, mark each fact as SUPPORTED, UNSUPPORTED, or UNCLEAR based on whether it can be directly verified from the question alone (not the solution)."""
+    #
+    # [NEW CODE]:
     # Stage 2: Verify key facts
     if len(key_facts) > 0:
         facts_text = "\n".join([f"{i + 1}. {fact}" for i, fact in enumerate(key_facts)])
-        prompt2 = f"""Given only the question below, mark each fact as SUPPORTED, UNSUPPORTED, or UNCLEAR based on whether it can be directly verified from the question alone (not the solution).
+        prompt2 = f"""Given the question and the proposed answer, evaluate whether each key fact is COHERENT (logically sound and relevant) or INCOHERENT (incorrect, irrelevant, or insufficient for the answer).
 
 Question: {question}
 
-Facts to verify:
+Proposed Key Facts:
 {facts_text}
 
-For each fact, respond with just: SUPPORTED, UNSUPPORTED, or UNCLEAR
-Format: "1. SUPPORTED" etc."""
+For each fact, respond with just: COHERENT or INCOHERENT
+Format: "1. COHERENT" etc.
+
+Mark a fact as INCOHERENT if it contains calculation errors, wrong assumptions, or doesn't logically contribute to solving the problem."""
 
         response2, tokens2 = call_llm(
             client, provider, model, prompt2, temperature, 100
         )
 
-        # Count supported facts
-        supported_count = response2.upper().count("SUPPORTED")
-        evidence_score = supported_count / len(key_facts) if len(key_facts) > 0 else 0.0
+        # Count coherent facts
+        coherent_count = response2.upper().count("COHERENT")
+        # Subtract the incoherent count to avoid double-counting "INCOHERENT" as "COHERENT"
+        incoherent_count = response2.upper().count("INCOHERENT")
+        coherent_count = max(0, coherent_count - incoherent_count)
+        evidence_score = coherent_count / len(key_facts) if len(key_facts) > 0 else 0.0
     else:
         tokens2 = 0
         evidence_score = 0.0
