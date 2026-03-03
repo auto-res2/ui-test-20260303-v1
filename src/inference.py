@@ -361,12 +361,21 @@ def tune_thresholds(
     """Tune thresholds on tuning set using grid search."""
     print(f"\nTuning thresholds for {method_type}...")
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: CoT never triggered (cot_trigger_rate=0) because confidence threshold too low
+    # [CAUSE]: Models like GPT-4o-mini report very high confidence (>0.8), so threshold 0.8 never triggers CoT
+    # [FIX]: Expand grid search to include higher thresholds (0.85, 0.9, 0.95) to allow triggering CoT when confidence is high but not perfect
+    #
+    # [OLD CODE]:
+    # for conf_thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
+    #
+    # [NEW CODE]:
     if method_type == "ca_cot":
         # Grid search for confidence threshold
         best_acc = 0.0
         best_threshold = 0.5
 
-        for conf_thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
+        for conf_thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95]:
             correct = 0
             for item in tuning_data[:20]:  # Use subset for faster tuning
                 result = method_ca_cot(
@@ -385,7 +394,7 @@ def tune_thresholds(
                     correct += 1
 
             acc = correct / 20
-            print(f"  conf_threshold={conf_thresh:.1f}: acc={acc:.3f}")
+            print(f"  conf_threshold={conf_thresh:.2f}: acc={acc:.3f}")
 
             if acc > best_acc:
                 best_acc = acc
@@ -394,13 +403,22 @@ def tune_thresholds(
         print(f"Best confidence_threshold: {best_threshold} (acc={best_acc:.3f})")
         return {"confidence_threshold": best_threshold}
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: EA-CoT may also have low trigger rate due to insufficient confidence threshold range
+    # [CAUSE]: Similar to CA-CoT, models report high confidence so threshold 0.7 may be too low
+    # [FIX]: Expand confidence threshold grid to include higher values (0.8, 0.85, 0.9)
+    #
+    # [OLD CODE]:
+    # for conf_thresh in [0.4, 0.5, 0.6, 0.7]:
+    #
+    # [NEW CODE]:
     elif method_type == "ea_cot":
         # Grid search for both thresholds
         best_acc = 0.0
         best_conf_thresh = 0.5
         best_ev_thresh = 0.5
 
-        for conf_thresh in [0.4, 0.5, 0.6, 0.7]:
+        for conf_thresh in [0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9]:
             for ev_thresh in [0.3, 0.5, 0.7]:
                 correct = 0
                 for item in tuning_data[:20]:  # Use subset for faster tuning
@@ -422,7 +440,7 @@ def tune_thresholds(
                         correct += 1
 
                 acc = correct / 20
-                print(f"  conf={conf_thresh:.1f}, ev={ev_thresh:.1f}: acc={acc:.3f}")
+                print(f"  conf={conf_thresh:.2f}, ev={ev_thresh:.2f}: acc={acc:.3f}")
 
                 if acc > best_acc:
                     best_acc = acc
@@ -430,7 +448,7 @@ def tune_thresholds(
                     best_ev_thresh = ev_thresh
 
         print(
-            f"Best thresholds: conf={best_conf_thresh}, ev={best_ev_thresh} (acc={best_acc:.3f})"
+            f"Best thresholds: conf={best_conf_thresh:.2f}, ev={best_ev_thresh:.2f} (acc={best_acc:.3f})"
         )
         return {
             "confidence_threshold": best_conf_thresh,
