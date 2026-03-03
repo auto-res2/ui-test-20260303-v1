@@ -267,44 +267,54 @@ Make sure each fact shows a specific numerical calculation or reasoning step."""
     except:
         pass
 
-    # [VALIDATOR FIX - Attempt 2]
-    # [PROBLEM]: Evidence verification never triggers CoT (evidence_score remains 1.0)
-    # [CAUSE]: The key facts extracted were often just restatements of the question, not calculation steps. Without seeing the calculations, the verifier couldn't catch errors. The hypothesis requires "verbalizable evidence" which should include the reasoning steps.
-    # [FIX]: (1) Modified prompt1 above to request "intermediate calculation steps" instead of generic "key facts". (2) Verification now checks if each calculation is mathematically correct.
+    # [VALIDATOR FIX - Attempt 3]
+    # [PROBLEM]: Evidence verification fails to catch inconsistencies between stated answer and calculations
+    # [CAUSE]: The verifier checks if each calculation is mathematically correct in isolation, but doesn't verify that the stated answer matches the result of those calculations. For example, model states "Answer: 336" but calculations show "$294 per week". Both calculations are correct, but the answer is wrong.
+    # [FIX]: Modified verification to check consistency - does the stated answer match the final result of the calculation chain?
     #
     # [OLD CODE]:
-    # Verification checked if facts "support" the answer generally
+    # Checked each calculation independently for math errors
     #
     # [NEW CODE]:
-    # Stage 2: Verify each calculation step
+    # Stage 2: Verify answer consistency with calculations
     if len(key_facts) > 0:
+        # Extract the stated answer from response1
+        stated_answer = None
+        try:
+            stated_answer = extract_numeric_answer(response1)
+        except:
+            pass
+
         facts_text = "\n".join([f"{i + 1}. {fact}" for i, fact in enumerate(key_facts)])
-        prompt2 = f"""You are a math teacher checking a student's work. Verify if each calculation below is CORRECT or contains an ERROR.
+
+        # Check if answer is consistent with calculations
+        prompt2 = f"""Check if the student's stated answer matches their calculations.
 
 Question: {question}
+
+Student's stated answer: {stated_answer}
 
 Student's calculation steps:
 {facts_text}
 
-For each step, verify the math and respond with:
-- "1. CORRECT" if the calculation is right
-- "1. ERROR" if there's a math mistake
+Verify:
+1. Are the calculations mathematically correct?
+2. Does the stated answer match the final result of these calculations?
 
-Only mark CORRECT if the numerical calculation is accurate."""
+Respond with ONLY one word:
+- "CONSISTENT" if the stated answer matches the calculation result
+- "INCONSISTENT" if the stated answer does not match, or if calculations have errors"""
 
         response2, tokens2 = call_llm(
             client, provider, model, prompt2, temperature, 100
         )
 
-        # Count correct calculations
-        # Check for "CORRECT" but exclude lines with "INCORRECT" or "ERROR"
-        lines = response2.upper().split("\n")
-        correct_count = sum(
-            1
-            for line in lines
-            if "CORRECT" in line and "INCORRECT" not in line and "ERROR" not in line
-        )
-        evidence_score = correct_count / len(key_facts) if len(key_facts) > 0 else 0.0
+        # Check for consistency
+        response_upper = response2.upper()
+        if "CONSISTENT" in response_upper and "INCONSISTENT" not in response_upper:
+            evidence_score = 1.0
+        else:
+            evidence_score = 0.0
     else:
         tokens2 = 0
         evidence_score = 0.0
