@@ -67,20 +67,55 @@ def parse_args():
 #     ...
 #
 # [NEW CODE]:
-def _convert_to_json_serializable(obj: Any) -> Any:
+# [VALIDATOR FIX - Attempt 2]
+# [PROBLEM]: RecursionError: maximum recursion depth exceeded while calling a Python object
+# [CAUSE]: Circular references in WandB objects cause infinite recursion in _convert_to_json_serializable
+# [FIX]: Add cycle detection using visited set to track already-processed objects by their ID
+#
+# [OLD CODE]:
+# def _convert_to_json_serializable(obj: Any) -> Any:
+#     if isinstance(obj, dict):
+#         return {key: _convert_to_json_serializable(value) for key, value in obj.items()}
+#     elif hasattr(obj, "__dict__"):
+#         return _convert_to_json_serializable(obj.__dict__)
+#
+# [NEW CODE]:
+def _convert_to_json_serializable(obj: Any, visited=None) -> Any:
     """
     Recursively convert WandB objects and other non-JSON-serializable types to plain Python types.
+    Handles circular references by tracking visited objects.
+
+    Args:
+        obj: Object to convert
+        visited: Set of object IDs already visited to prevent infinite recursion
     """
+    if visited is None:
+        visited = set()
+
+    # Check for circular reference using object ID
+    obj_id = id(obj)
+    if obj_id in visited:
+        # Return a placeholder for circular references
+        return "<circular reference>"
+
+    # For primitive immutable types, return as-is without tracking
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+
+    # Mark this object as visited before processing its contents
+    visited.add(obj_id)
+
     if isinstance(obj, dict):
         # Handle dict-like objects including WandB SummarySubDict
-        return {key: _convert_to_json_serializable(value) for key, value in obj.items()}
+        return {
+            key: _convert_to_json_serializable(value, visited)
+            for key, value in obj.items()
+        }
     elif isinstance(obj, (list, tuple)):
-        return [_convert_to_json_serializable(item) for item in obj]
-    elif isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
+        return [_convert_to_json_serializable(item, visited) for item in obj]
     elif hasattr(obj, "__dict__"):
         # For custom objects, try to convert their __dict__
-        return _convert_to_json_serializable(obj.__dict__)
+        return _convert_to_json_serializable(obj.__dict__, visited)
     else:
         # For other types, convert to string as fallback
         return str(obj)
