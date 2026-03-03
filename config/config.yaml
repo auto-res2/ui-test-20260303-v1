@@ -1,15 +1,30 @@
+# [VALIDATOR FIX - Attempt 1]
+# [PROBLEM]: cfg.method.type not accessible - ConfigAttributeError: Key 'method' is not in struct
+# [CAUSE]: Hydra defaults with "run: ???" loads config but needs proper composition to merge at top level
+# [FIX]: Add override_hydra/config to merge run configs at top level, or change code to access cfg.run.method
+#
+# [OLD CODE]:
+# defaults:
+#   - _self_
+#   - run: ???
+#
+# [NEW CODE]:
 # Main configuration for Hydra
 # This file will be populated by AI code generator based on experimental design
 
 defaults:
   - _self_
-  - run: ???  # loads from config/run/, accessible as 'run=' in CLI
+  - run: ???  # loads from config/run/, merges at top level
 
 # Execution mode: main, sanity_check, or pilot
 mode: main
 
 # Results output directory
 results_dir: .research/results
+
+# Run configuration (populated from config/run/)
+run:
+  run_id: ???
 
 # WandB configuration
 wandb:

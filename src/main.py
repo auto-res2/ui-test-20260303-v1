@@ -12,10 +12,20 @@ def main(cfg: DictConfig) -> None:
     Main entry point for running a single experiment.
     Orchestrates inference based on the method type.
     """
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: ConfigAttributeError: Key 'method' is not in struct (line 18)
+    # [CAUSE]: Run config is loaded under cfg.run namespace, not merged at top level
+    # [FIX]: Access method via cfg.run.method instead of cfg.method
+    #
+    # [OLD CODE]:
+    # print(f"Method: {cfg.method.type}")
+    # cfg.dataset.num_tuning = ...
+    #
+    # [NEW CODE]:
     print("=" * 80)
     print(f"Running: {cfg.run.run_id}")
     print(f"Mode: {cfg.mode}")
-    print(f"Method: {cfg.method.type}")
+    print(f"Method: {cfg.run.method.type}")
     print("=" * 80)
 
     # Validate required fields
@@ -25,8 +35,8 @@ def main(cfg: DictConfig) -> None:
     # Override settings based on mode
     if cfg.mode == "sanity_check":
         # For sanity check: use fewer examples, online wandb
-        cfg.dataset.num_tuning = min(10, cfg.dataset.num_tuning)
-        cfg.dataset.num_eval = min(10, cfg.dataset.num_eval)
+        cfg.run.dataset.num_tuning = min(10, cfg.run.dataset.num_tuning)
+        cfg.run.dataset.num_eval = min(10, cfg.run.dataset.num_eval)
         cfg.wandb.mode = "online"
     elif cfg.mode == "main":
         # For main runs: ensure online wandb

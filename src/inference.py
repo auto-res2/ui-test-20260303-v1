@@ -341,6 +341,15 @@ Let's solve this step by step:"""
         }
 
 
+# [VALIDATOR FIX - Attempt 1]
+# [PROBLEM]: cfg.method/model/dataset accessed incorrectly (should be under cfg.run)
+# [CAUSE]: Run config is loaded under cfg.run namespace by Hydra config groups
+# [FIX]: Update all config accessors to use cfg.run.* paths
+#
+# [OLD CODE]:
+# cfg.model.temperature, cfg.model.max_tokens, cfg.method.num_key_facts
+#
+# [NEW CODE]:
 def tune_thresholds(
     client,
     provider: str,
@@ -365,8 +374,8 @@ def tune_thresholds(
                     provider,
                     model,
                     item["question"],
-                    cfg.model.temperature,
-                    cfg.model.max_tokens,
+                    cfg.run.model.temperature,
+                    cfg.run.model.max_tokens,
                     conf_thresh,
                 )
                 if (
@@ -400,11 +409,11 @@ def tune_thresholds(
                         provider,
                         model,
                         item["question"],
-                        cfg.model.temperature,
-                        cfg.model.max_tokens,
+                        cfg.run.model.temperature,
+                        cfg.run.model.max_tokens,
                         conf_thresh,
                         ev_thresh,
-                        cfg.method.num_key_facts,
+                        cfg.run.method.num_key_facts,
                     )
                     if (
                         result["answer"] is not None
@@ -451,15 +460,15 @@ def run_inference(cfg: DictConfig) -> None:
         print(f"WandB run: {wandb.run.url}")
 
     # Load data
-    print(f"\nLoading {cfg.dataset.name} dataset...")
+    print(f"\nLoading {cfg.run.dataset.name} dataset...")
     data = load_gsm8k_data(
-        cache_dir=cfg.inference.cache_dir,
-        num_tuning=cfg.dataset.num_tuning,
-        num_eval=cfg.dataset.num_eval,
+        cache_dir=cfg.run.inference.cache_dir,
+        num_tuning=cfg.run.dataset.num_tuning,
+        num_eval=cfg.run.dataset.num_eval,
     )
 
     # Initialize LLM client
-    client = get_llm_client(cfg.model.provider)
+    client = get_llm_client(cfg.run.model.provider)
 
     # Determine which data to use based on mode
     if cfg.mode == "sanity_check":
@@ -472,13 +481,13 @@ def run_inference(cfg: DictConfig) -> None:
 
     # Tune thresholds if needed
     thresholds = {}
-    if cfg.method.type in ["ca_cot", "ea_cot"]:
+    if cfg.run.method.type in ["ca_cot", "ea_cot"]:
         thresholds = tune_thresholds(
             client,
-            cfg.model.provider,
-            cfg.model.name,
+            cfg.run.model.provider,
+            cfg.run.model.name,
             tuning_data,
-            cfg.method.type,
+            cfg.run.method.type,
             cfg,
         )
 
@@ -487,48 +496,48 @@ def run_inference(cfg: DictConfig) -> None:
     results = []
 
     for item in tqdm(eval_data):
-        if cfg.method.type == "direct":
+        if cfg.run.method.type == "direct":
             result = method_direct(
                 client,
-                cfg.model.provider,
-                cfg.model.name,
+                cfg.run.model.provider,
+                cfg.run.model.name,
                 item["question"],
-                cfg.model.temperature,
-                cfg.model.max_tokens,
+                cfg.run.model.temperature,
+                cfg.run.model.max_tokens,
             )
-        elif cfg.method.type == "fixed_cot":
+        elif cfg.run.method.type == "fixed_cot":
             result = method_fixed_cot(
                 client,
-                cfg.model.provider,
-                cfg.model.name,
+                cfg.run.model.provider,
+                cfg.run.model.name,
                 item["question"],
-                cfg.model.temperature,
-                cfg.model.max_tokens,
+                cfg.run.model.temperature,
+                cfg.run.model.max_tokens,
             )
-        elif cfg.method.type == "ca_cot":
+        elif cfg.run.method.type == "ca_cot":
             result = method_ca_cot(
                 client,
-                cfg.model.provider,
-                cfg.model.name,
+                cfg.run.model.provider,
+                cfg.run.model.name,
                 item["question"],
-                cfg.model.temperature,
-                cfg.model.max_tokens,
+                cfg.run.model.temperature,
+                cfg.run.model.max_tokens,
                 thresholds["confidence_threshold"],
             )
-        elif cfg.method.type == "ea_cot":
+        elif cfg.run.method.type == "ea_cot":
             result = method_ea_cot(
                 client,
-                cfg.model.provider,
-                cfg.model.name,
+                cfg.run.model.provider,
+                cfg.run.model.name,
                 item["question"],
-                cfg.model.temperature,
-                cfg.model.max_tokens,
+                cfg.run.model.temperature,
+                cfg.run.model.max_tokens,
                 thresholds["confidence_threshold"],
                 thresholds["evidence_threshold"],
-                cfg.method.num_key_facts,
+                cfg.run.method.get("num_key_facts", 3),
             )
         else:
-            raise ValueError(f"Unknown method type: {cfg.method.type}")
+            raise ValueError(f"Unknown method type: {cfg.run.method.type}")
 
         # Check correctness
         correct = False
@@ -547,7 +556,7 @@ def run_inference(cfg: DictConfig) -> None:
 
     # Compute confident-wrong rate (for adaptive methods)
     confident_wrong_rate = 0.0
-    if cfg.method.type in ["ca_cot", "ea_cot"]:
+    if cfg.run.method.type in ["ca_cot", "ea_cot"]:
         high_conf_results = [r for r in results if r.get("confidence", 0) > 0.7]
         if len(high_conf_results) > 0:
             confident_wrong_rate = 1.0 - np.mean(
@@ -591,7 +600,7 @@ def run_inference(cfg: DictConfig) -> None:
 
     # Sanity validation for sanity_check mode
     if cfg.mode == "sanity_check":
-        perform_sanity_validation(results, metrics, cfg.method.type)
+        perform_sanity_validation(results, metrics, cfg.run.method.type)
 
     if cfg.wandb.mode != "disabled":
         wandb.finish()
