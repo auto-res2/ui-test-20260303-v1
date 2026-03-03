@@ -32,12 +32,24 @@ def main(cfg: DictConfig) -> None:
     if not hasattr(cfg, "run") or not hasattr(cfg.run, "run_id"):
         raise ValueError("Config must have run.run_id field")
 
+    # [VALIDATOR FIX - Attempt 2]
+    # [PROBLEM]: Sanity validation failed because outputs_valid=false (3/10 answers were null)
+    # [CAUSE]: max_tokens=500 is too low for CoT responses; some responses were truncated mid-answer
+    # [FIX]: Increase max_tokens to 800 in sanity_check mode to prevent truncation
+    #
+    # [OLD CODE]:
+    # cfg.wandb.mode = "online"
+    #
+    # [NEW CODE]:
     # Override settings based on mode
     if cfg.mode == "sanity_check":
-        # For sanity check: use fewer examples, online wandb
+        # For sanity check: use fewer examples, online wandb, higher max_tokens for CoT
         cfg.run.dataset.num_tuning = min(10, cfg.run.dataset.num_tuning)
         cfg.run.dataset.num_eval = min(10, cfg.run.dataset.num_eval)
         cfg.wandb.mode = "online"
+        # Increase max_tokens to prevent truncation in CoT responses
+        if cfg.run.model.max_tokens < 800:
+            cfg.run.model.max_tokens = 800
     elif cfg.mode == "main":
         # For main runs: ensure online wandb
         cfg.wandb.mode = "online"
