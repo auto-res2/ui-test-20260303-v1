@@ -16,6 +16,28 @@ from typing import List, Dict, Any
 
 def parse_args():
     """Parse command line arguments."""
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: evaluate.py called with Hydra-style arguments (key=value) but uses argparse expecting --key value
+    # [CAUSE]: Workflow calls `uv run python -u -m src.evaluate results_dir="..." run_ids='...'` without -- prefixes
+    # [FIX]: Pre-process sys.argv to convert Hydra-style arguments to argparse format
+    #
+    # [OLD CODE]:
+    # parser = argparse.ArgumentParser(description="Evaluate and compare experiment runs")
+    # parser.add_argument("--results_dir", type=str, required=True, help="Results directory")
+    # ...
+    # return parser.parse_args()
+    #
+    # [NEW CODE]:
+    # Convert key=value arguments to --key value format
+    processed_argv = []
+    for arg in sys.argv[1:]:
+        if "=" in arg and not arg.startswith("--"):
+            # Split key=value into --key value
+            key, value = arg.split("=", 1)
+            processed_argv.extend([f"--{key}", value])
+        else:
+            processed_argv.append(arg)
+
     parser = argparse.ArgumentParser(description="Evaluate and compare experiment runs")
     parser.add_argument(
         "--results_dir", type=str, required=True, help="Results directory"
@@ -29,7 +51,7 @@ def parse_args():
     parser.add_argument(
         "--wandb_project", type=str, default="ui-test-20260303-v1", help="WandB project"
     )
-    return parser.parse_args()
+    return parser.parse_args(processed_argv)
 
 
 def fetch_run_data(entity: str, project: str, run_id: str) -> Dict[str, Any]:
